@@ -1,6 +1,8 @@
 package netutil
 
 import (
+	"fmt"
+	"io"
 	"os"
 	"strings"
 	//	"path/filepath"
@@ -8,7 +10,14 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	neturl "net/url"
+	"time"
 )
+
+// 单次远程抓取的上限与超时, 避免被慢连接/超大文件拖垮服务
+const maxDownloadSize = 20 * 1024 * 1024
+
+var httpClient = &http.Client{Timeout: 15 * time.Second}
 
 // net的util
 
@@ -38,10 +47,10 @@ func WriteUrl(url string, toPath string) (length int64, newFilename, path string
 
 	// 写到文件中
 	file, err := os.Create(fullPath)
-	defer file.Close()
 	if err != nil {
 		return
 	}
+	defer file.Close()
 	file.Write(content)
 
 	path = fullPath
@@ -50,26 +59,27 @@ func WriteUrl(url string, toPath string) (length int64, newFilename, path string
 }
 
 // 得到内容
-func GetContent(url string) (content []byte, err error) {
-	var resp *http.Response
-	resp, err = http.Get(url)
-	if resp != nil && resp.Body != nil {
-		defer resp.Body.Close()
-	} else {
-	}
-	if resp == nil || resp.Body == nil || err != nil || resp.StatusCode != http.StatusOK {
-		return
-	}
-
-	var buf []byte
-	buf, err = ioutil.ReadAll(resp.Body)
+func GetContent(rawUrl string) (content []byte, err error) {
+	u, err := neturl.Parse(rawUrl)
 	if err != nil {
-		return
+		return nil, err
+	}
+	// 只允许 http/https, 避免 file:// 等协议被用来读取本地文件
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return nil, fmt.Errorf("unsupported url scheme: %s", u.Scheme)
 	}
 
-	content = buf
-	err = nil
-	return
+	resp, err := httpClient.Get(u.String())
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status: %d", resp.StatusCode)
+	}
+
+	// 限制读取大小, 超出部分直接截断
+	return ioutil.ReadAll(io.LimitReader(resp.Body, maxDownloadSize))
 }
 
 // 将url ?, #后面的字符串去掉

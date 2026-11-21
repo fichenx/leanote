@@ -46,19 +46,19 @@ func (c ApiBaseContrller) uploadAttach(name string, noteId string) (ok bool, msg
 	userId := c.getUserId()
 
 	// 判断是否有权限为笔记添加附件
-	// 如果笔记还没有添加是不是会有问题
-	/*
-		if !shareService.HasUpdateNotePerm(noteId, userId) {
-			return
-		}
-	*/
+	if userId == "" || noteId == "" || !bson.IsObjectIdHex(noteId) || !shareService.HasUpdateNotePerm(noteId, userId) {
+		msg = "noPerm"
+		return
+	}
 
 	var data []byte
 	c.Params.Bind(&data, name)
-	handel := c.Params.Files[name][0]
-	if data == nil || len(data) == 0 {
+	files := c.Params.Files[name]
+	if data == nil || len(data) == 0 || len(files) == 0 {
+		msg = "noFile"
 		return
 	}
+	handel := files[0]
 
 	// file, handel, err := c.Request.FormFile(name)
 	// if err != nil {
@@ -137,10 +137,12 @@ func (c ApiBaseContrller) upload(name string, noteId string, isAttach bool) (ok 
 
 	var data []byte
 	c.Params.Bind(&data, name)
-	handel := c.Params.Files[name][0]
-	if data == nil || len(data) == 0 {
+	files := c.Params.Files[name]
+	if data == nil || len(data) == 0 || len(files) == 0 {
+		msg = "noFile"
 		return
 	}
+	handel := files[0]
 
 	newGuid := NewGuid()
 	// 生成上传路径

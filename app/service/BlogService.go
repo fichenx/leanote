@@ -7,6 +7,7 @@ import (
 	"gopkg.in/mgo.v2/bson"
 	//	"time"
 	//	"sort"
+	"html"
 	"strconv"
 	"strings"
 	"time"
@@ -453,7 +454,7 @@ func (this *BlogService) ListAllBlogs(userId, tag string, keywords string, isRec
 		query["IsRecommend"] = isRecommend
 	}
 	if keywords != "" {
-		query["Title"] = bson.M{"$regex": bson.RegEx{".*?" + keywords + ".*", "i"}}
+		query["Title"] = bson.M{"$regex": bson.RegEx{".*?" + EscapeRegexp(keywords) + ".*", "i"}}
 	}
 	q := db.Notes.Find(query)
 
@@ -697,6 +698,8 @@ func (this *BlogService) Comment(noteId, toCommentId, userId, content string) (b
 	if content == "" {
 		return false, comment
 	}
+	// 评论是纯文本, 入库前统一转义, 模板里的 [[html:Content]] 才不会执行用户注入的脚本
+	content = html.EscapeString(content)
 
 	note := noteService.GetNoteById(noteId)
 	if !note.IsBlog {

@@ -177,6 +177,30 @@ func close() {
 	Session.Close()
 }
 
+// 启动时为常用查询建索引, 失败只记日志(老库可能已有冲突数据), 不阻断启动
+func EnsureIndexes() {
+	indexes := []struct {
+		collection *mgo.Collection
+		key        []string
+	}{
+		{Notes, []string{"UserId", "IsTrash", "UpdatedTime"}},
+		{Notes, []string{"UserId", "NotebookId", "IsTrash"}},
+		{Notes, []string{"UserId", "IsBlog"}},
+		{Notebooks, []string{"UserId"}},
+		{Tags, []string{"UserId"}},
+		{NoteContents, []string{"NoteId"}},
+		{Attachs, []string{"NoteId"}},
+		{ShareNotes, []string{"NoteId", "UserId"}},
+		{Files, []string{"UserId"}},
+	}
+	for _, idx := range indexes {
+		err := idx.collection.EnsureIndex(mgo.Index{Key: idx.key, Background: true})
+		if err != nil {
+			Log("ensure index " + idx.collection.Name + "(" + strings.Join(idx.key, ",") + ") error: " + err.Error())
+		}
+	}
+}
+
 // common DAO
 // 公用方法
 

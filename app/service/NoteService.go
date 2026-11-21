@@ -825,9 +825,10 @@ func (this *NoteService) SearchNote(key, userId string, pageNumber, pageSize int
 	skipNum, sortFieldR := parsePageAndSort(pageNumber, pageSize, sortField, isAsc)
 
 	// 利用标题和desc, 不用content
+	keyRegex := EscapeRegexp(key)
 	orQ := []bson.M{
-		bson.M{"Title": bson.M{"$regex": bson.RegEx{".*?" + key + ".*", "i"}}},
-		bson.M{"Desc": bson.M{"$regex": bson.RegEx{".*?" + key + ".*", "i"}}},
+		bson.M{"Title": bson.M{"$regex": bson.RegEx{".*?" + keyRegex + ".*", "i"}}},
+		bson.M{"Desc": bson.M{"$regex": bson.RegEx{".*?" + keyRegex + ".*", "i"}}},
 	}
 	// 不是trash的
 	query := bson.M{"UserId": bson.ObjectIdHex(userId),
@@ -866,7 +867,7 @@ func (this *NoteService) searchNoteFromContent(notes []info.Note, userId, key st
 	query := bson.M{
 		"_id":     bson.M{"$nin": noteIds},
 		"UserId":  bson.ObjectIdHex(userId),
-		"Content": bson.M{"$regex": bson.RegEx{".*?" + key + ".*", "i"}},
+		"Content": bson.M{"$regex": bson.RegEx{".*?" + EscapeRegexp(key) + ".*", "i"}},
 	}
 	if isBlog {
 		query["IsBlog"] = true

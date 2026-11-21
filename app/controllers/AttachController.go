@@ -12,6 +12,7 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"path"
 	"strings"
 	"time"
 )
@@ -150,6 +151,9 @@ func (c Attach) Download(attachId string) revel.Result {
 }
 
 func (c Attach) DownloadAll(noteId string) revel.Result {
+	if !IsObjectId(noteId) {
+		return c.RenderText("")
+	}
 	note := noteService.GetNoteById(noteId)
 	if note.NoteId == "" {
 		return c.RenderText("")
@@ -160,74 +164,84 @@ func (c Attach) DownloadAll(noteId string) revel.Result {
 		return c.RenderText("")
 	}
 
-	/*
-		dir := revel.BasePath + "/files/tmp"
-		err := os.MkdirAll(dir, 0755)
-		if err != nil {
-			return c.RenderText("")
-		}
-	*/
-
-	filename := note.Title + ".tar.gz"
-	if note.Title == "" {
-		filename = "all.tar.gz"
-	}
-
 	dir := revel.BasePath + "/files/attach_all"
-
 	if !MkdirAll(dir) {
 		return c.RenderText("error")
 	}
 
-	// file write
-	fw, err := os.Create(dir + "/" + filename)
+	// 用随机文件名打包, 避免用户可控的笔记标题参与路径拼接
+	tmpPath := dir + "/" + NewGuid() + ".tar.gz"
+	if err := writeAttachsTar(tmpPath, attachs); err != nil {
+		os.Remove(tmpPath)
+		return c.RenderText("error")
+	}
+	defer os.Remove(tmpPath)
+
+	file, err := os.Open(tmpPath)
 	if err != nil {
 		return c.RenderText("error")
 	}
-	// defer fw.Close() // 不需要关闭, 还要读取给用户下载
+	defer file.Close()
 
-	// gzip write
+	downloadName := "attachs.tar.gz"
+	if title := FixFilename(note.Title); title != "" {
+		downloadName = title + ".tar.gz"
+	}
+	return c.RenderBinary(file, downloadName, revel.Attachment, time.Now()) // revel.Attachment
+}
+
+// 将附件打包为 tar.gz, 文件名取标题的 base 名, 防止写入归档时带出 ../ 路径
+func writeAttachsTar(toPath string, attachs []info.Attach) error {
+	fw, err := os.Create(toPath)
+	if err != nil {
+		return err
+	}
 	gw := gzip.NewWriter(fw)
-	defer gw.Close()
-
-	// tar write
 	tw := tar.NewWriter(gw)
-	defer tw.Close()
 
-	// 遍历文件列表
-	for _, attach := range attachs {
+	for i, attach := range attachs {
+		name := path.Base(strings.Replace(attach.Title, "\\", "/", -1))
+		if name == "" || name == "." || name == ".." {
+			name = fmt.Sprintf("attach-%d", i+1)
+		}
+
 		fn := revel.BasePath + "/" + strings.TrimLeft(attach.Path, "/")
 		fr, err := os.Open(fn)
-		fileInfo, _ := fr.Stat()
 		if err != nil {
-			return c.RenderText("")
+			continue // 单个附件丢失时跳过, 不中断整个打包
 		}
-		defer fr.Close()
-
-		// 信息头
-		h := new(tar.Header)
-		h.Name = attach.Title
-		h.Size = fileInfo.Size()
-		h.Mode = int64(fileInfo.Mode())
-		h.ModTime = fileInfo.ModTime()
-
-		// 写信息头
-		err = tw.WriteHeader(h)
-		if err != nil {
-			panic(err)
+		fileInfo, err := fr.Stat()
+		if err != nil || fileInfo.IsDir() {
+			fr.Close()
+			continue
 		}
 
-		// 写文件
-		_, err = io.Copy(tw, fr)
-		if err != nil {
-			panic(err)
+		err = tw.WriteHeader(&tar.Header{
+			Name:    name,
+			Size:    fileInfo.Size(),
+			Mode:    int64(fileInfo.Mode()),
+			ModTime: fileInfo.ModTime(),
+		})
+		if err == nil {
+			_, err = io.Copy(tw, fr)
 		}
-	} // for
+		fr.Close()
+		if err != nil {
+			tw.Close()
+			gw.Close()
+			fw.Close()
+			return err
+		}
+	}
 
-	//    tw.Close()
-	//    gw.Close()
-	//    fw.Close()
-	//    file, _ := os.Open(dir + "/" + filename)
-	// fw.Seek(0, 0)
-	return c.RenderBinary(fw, filename, revel.Attachment, time.Now()) // revel.Attachment
+	if err := tw.Close(); err != nil {
+		gw.Close()
+		fw.Close()
+		return err
+	}
+	if err := gw.Close(); err != nil {
+		fw.Close()
+		return err
+	}
+	return fw.Close()
 }

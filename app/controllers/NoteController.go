@@ -3,12 +3,16 @@ package controllers
 import (
 	"github.com/revel/revel"
 	//	"encoding/json"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"github.com/leanote/leanote/app/info"
 	. "github.com/leanote/leanote/app/lea"
 	"gopkg.in/mgo.v2/bson"
 	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"runtime"
@@ -326,9 +330,8 @@ func (c Note) SearchNoteByTags(tags []string) revel.Result {
 
 // 生成PDF
 func (c Note) ToPdf(noteId, appKey string) revel.Result {
-	// 虽然传了cookie但是这里还是不能得到userId, 所以还是通过appKey来验证之
-	appKeyTrue, _ := revel.Config.String("app.secret")
-	if appKeyTrue != appKey {
+	// 该接口在免登录白名单里, 只接受 ExportPdf 生成的一次性短时签名, 不再接受 app.secret 明文
+	if !IsObjectId(noteId) || !validPdfToken(noteId, appKey) {
 		return c.RenderText("auth error")
 	}
 	note := noteService.GetNoteById(noteId)
@@ -438,11 +441,8 @@ func (c Note) ExportPdf(noteId string) revel.Result {
 	filename := guid + ".pdf"
 	path := dir + "/" + filename
 
-	// leanote.com的secret
-	appKey, _ := revel.Config.String("app.secretLeanote")
-	if appKey == "" {
-		appKey, _ = revel.Config.String("app.secret")
-	}
+	// 只为本次导出生成 5 分钟有效的签名, 避免把 app.secret 写进命令行与访问日志
+	appKey := issuePdfToken(noteId)
 
 	// 生成之
 	binPath := configService.GetGlobalStringConfig("exportPdfBinPath")
@@ -503,6 +503,35 @@ func (c Note) ExportPdf(noteId string) revel.Result {
 		filenameReturn += ".pdf"
 	}
 	return c.RenderBinary(file, filenameReturn, revel.Attachment, time.Now()) // revel.Attachment
+}
+
+// PDF 导出签名有效期
+const pdfTokenLifetime = 5 * time.Minute
+
+// 为 noteId 生成短时有效的 HMAC 签名, 只用于 wkhtmltopdf 访问免登录的 toPdf 接口
+func issuePdfToken(noteId string) string {
+	payload := noteId + "." + strconv.FormatInt(time.Now().Add(pdfTokenLifetime).Unix(), 10)
+	return payload + "." + pdfTokenSign(payload)
+}
+
+func pdfTokenSign(payload string) string {
+	secret, _ := revel.Config.String("app.secret")
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(payload))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// 校验签名: 结构为 noteId.expires.sign, 且过期时间未到
+func validPdfToken(noteId, token string) bool {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 || parts[0] != noteId {
+		return false
+	}
+	expires, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil || time.Now().Unix() > expires {
+		return false
+	}
+	return hmac.Equal([]byte(parts[2]), []byte(pdfTokenSign(parts[0]+"."+parts[1])))
 }
 
 // 设置/取消Blog; 置顶

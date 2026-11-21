@@ -433,9 +433,10 @@ func (this *UserService) ListUsers(pageNumber, pageSize int, sortField string, i
 	skipNum, sortFieldR := parsePageAndSort(pageNumber, pageSize, sortField, isAsc)
 	query := bson.M{}
 	if email != "" {
+		emailRegex := EscapeRegexp(email)
 		orQ := []bson.M{
-			bson.M{"Email": bson.M{"$regex": bson.RegEx{".*?" + email + ".*", "i"}}},
-			bson.M{"Username": bson.M{"$regex": bson.RegEx{".*?" + email + ".*", "i"}}},
+			bson.M{"Email": bson.M{"$regex": bson.RegEx{".*?" + emailRegex + ".*", "i"}}},
+			bson.M{"Username": bson.M{"$regex": bson.RegEx{".*?" + emailRegex + ".*", "i"}}},
 		}
 		query["$or"] = orQ
 	}
@@ -460,8 +461,9 @@ func (this *UserService) GetAllUserByFilter(userFilterEmail, userFilterWhiteList
 
 	orQ := []bson.M{}
 	if userFilterEmail != "" {
-		orQ = append(orQ, bson.M{"Email": bson.M{"$regex": bson.RegEx{".*?" + userFilterEmail + ".*", "i"}}},
-			bson.M{"Username": bson.M{"$regex": bson.RegEx{".*?" + userFilterEmail + ".*", "i"}}},
+		emailRegex := EscapeRegexp(userFilterEmail)
+		orQ = append(orQ, bson.M{"Email": bson.M{"$regex": bson.RegEx{".*?" + emailRegex + ".*", "i"}}},
+			bson.M{"Username": bson.M{"$regex": bson.RegEx{".*?" + emailRegex + ".*", "i"}}},
 		)
 	}
 	if userFilterWhiteList != "" {

@@ -419,8 +419,10 @@ func init() {
 
 	// init Email
 	revel.OnAppStart(func() {
+		checkSecurityConfig()
 		// 数据库
 		db.Init("", "")
+		db.EnsureIndexes()
 		// email配置
 		InitEmail()
 		InitVd()
@@ -433,4 +435,29 @@ func init() {
 		service.ConfigS.InitGlobalConfigs()
 		api.InitService()
 	})
+}
+
+// 上游 conf/app.conf 中的默认密钥, 一旦使用它, 会话 cookie 与 PDF 签名即可被伪造
+const defaultAppSecret = "V85ZzBeTnzpsHyjQX4zukbQ8qqtju9y2aDM55VWxAH9Qop19poekx3xkcDVvrD0y"
+
+// 启动时校验关键安全配置, 避免用默认密钥部署到生产环境
+func checkSecurityConfig() {
+	isProd := !revel.Config.BoolDefault("mode.dev", true)
+	appSecret, _ := revel.Config.String("app.secret")
+
+	if appSecret == "" || appSecret == defaultAppSecret || len(appSecret) < 32 {
+		if isProd {
+			panic("[security] app.secret 仍为默认值或长度不足 32 位, 请在 conf/app.conf 中配置随机密钥后重启(openssl rand -hex 32)")
+		}
+		revel.WARN.Printf("[security] app.secret 仍为默认值或长度不足 32 位, 生产环境必须修改")
+	}
+
+	if httponly, ok := revel.Config.Bool("cookie.httponly"); !ok || !httponly {
+		revel.WARN.Printf("[security] cookie.httponly 未开启, 会话 cookie 可被前端脚本读取")
+	}
+	if isProd {
+		if secure, _ := revel.Config.Bool("http.ssl"); !secure {
+			revel.WARN.Printf("[security] 生产环境建议开启 http.ssl 与 cookie.secure, 避免会话在明文 HTTP 上传输")
+		}
+	}
 }

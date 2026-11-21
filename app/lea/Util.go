@@ -375,6 +375,11 @@ func InArray(arr []string, str string) bool {
 	return false
 }
 
+// 转义正则元字符, 避免把用户输入当作正则执行(ReDoS / 全表扫描)
+func EscapeRegexp(s string) string {
+	return regexp.QuoteMeta(s)
+}
+
 // 将名称的特殊字符去掉
 func FixFilename(filename string) string {
 	if filename != "" {

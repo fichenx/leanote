@@ -146,19 +146,20 @@ func Unzip(srcFilePath string, destDirPath string) (ok bool, msg string) {
 	defer r.Close()
 	for _, f := range r.File {
 		// fmt.Println("FileName : ", f.Name); // j/aaa.zip
+		// 统一分隔符后拒绝绝对路径与 ../, 防止 zip-slip 写到目标目录之外
+		name := strings.Replace(f.Name, "\\", "/", -1)
+		if strings.HasPrefix(name, "/") || name == ".." || strings.Contains(name, "../") || strings.Contains(name, "/..") {
+			lea.LogW("恶意文件", f.Name)
+			continue
+		}
+
 		rc, err := f.Open()
 		if err != nil {
 			panic(err)
 		}
 
-		// 包含恶意目录
-		if strings.Contains(f.Name, "../") {
-			lea.LogW("恶意文件", f.Name);
-			continue
-		}
-
 		// 把首文件夹去掉, 即j去掉, 分离出文件夹和文件名
-		paths := strings.Split(f.Name, "/")
+		paths := strings.Split(name, "/")
 		prePath := ""
 		filename := ""
 		l := len(paths)
@@ -172,9 +173,15 @@ func Unzip(srcFilePath string, destDirPath string) (ok bool, msg string) {
 				prePath = strings.Join(paths[1:l-1], "/")
 			}
 		} else {
-			filename = f.Name
+			filename = name
 		}
-		//		fmt.Println(prePath)
+
+		// 目录项没有内容, 只创建目录
+		if f.FileInfo().IsDir() || filename == "" {
+			os.MkdirAll(destDirPath+"/"+prePath, os.ModePerm)
+			rc.Close()
+			continue
+		}
 
 		// 相对于目标文件件下的路径
 		destPath := destDirPath + "/" + filename
@@ -183,12 +190,14 @@ func Unzip(srcFilePath string, destDirPath string) (ok bool, msg string) {
 			destPath = destDirPath + "/" + prePath + "/" + filename
 		}
 		// Write data to file
-		//        fmt.Println(destPath)
-		fw, _ := os.Create(destPath)
+		fw, err := os.Create(destPath)
 		if err != nil {
+			rc.Close()
 			panic(err)
 		}
 		_, err = io.Copy(fw, rc)
+		fw.Close()
+		rc.Close()
 		if err != nil {
 			panic(err)
 		}

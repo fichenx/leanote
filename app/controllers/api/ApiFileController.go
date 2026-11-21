@@ -3,16 +3,18 @@ package api
 import (
 	"github.com/revel/revel"
 	//	"encoding/json"
-	//	. "github.com/leanote/leanote/app/lea"
+	. "github.com/leanote/leanote/app/lea"
 	//	"gopkg.in/mgo.v2/bson"
 	//	"github.com/leanote/leanote/app/lea/netutil"
-	//	"github.com/leanote/leanote/app/info"
+	"github.com/leanote/leanote/app/info"
 	//	"io/ioutil"
 	"os"
 	//	"strconv"
 	"archive/tar"
 	"compress/gzip"
+	"fmt"
 	"io"
+	"path"
 	"strings"
 	"time"
 )
@@ -86,6 +88,9 @@ func (c ApiFile) GetAttach(fileId string) revel.Result {
 // 下载所有附件
 // [OK]
 func (c ApiFile) GetAllAttachs(noteId string) revel.Result {
+	if !IsObjectId(noteId) {
+		return c.RenderText("")
+	}
 	note := noteService.GetNoteById(noteId)
 	if note.NoteId == "" {
 		return c.RenderText("")
@@ -96,68 +101,80 @@ func (c ApiFile) GetAllAttachs(noteId string) revel.Result {
 		return c.RenderText("")
 	}
 
-	/*
-		dir := revel.BasePath + "/files/tmp"
-		err := os.MkdirAll(dir, 0755)
-		if err != nil {
-			return c.RenderText("")
-		}
-	*/
-
-	filename := note.Title + ".tar.gz"
-	if note.Title == "" {
-		filename = "all.tar.gz"
+	dir := revel.BasePath + "/files/attach_all"
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return c.RenderText("")
 	}
 
-	// file write
-	fw, err := os.Create(revel.BasePath + "/files/" + filename)
+	// 随机文件名, 避免并发的同名打包互相覆盖
+	tmpPath := dir + "/" + NewGuid() + ".tar.gz"
+	if err := writeAttachsTar(tmpPath, attachs); err != nil {
+		os.Remove(tmpPath)
+		return c.RenderText("")
+	}
+	defer os.Remove(tmpPath)
+
+	file, err := os.Open(tmpPath)
 	if err != nil {
 		return c.RenderText("")
 	}
-	// defer fw.Close() // 不需要关闭, 还要读取给用户下载
+	defer file.Close()
 
-	// gzip write
+	return c.RenderBinary(file, "attachs.tar.gz", revel.Attachment, time.Now()) // revel.Attachment
+}
+
+// 将附件打包为 tar.gz, 归档内文件名只保留 base 名
+func writeAttachsTar(toPath string, attachs []info.Attach) error {
+	fw, err := os.Create(toPath)
+	if err != nil {
+		return err
+	}
 	gw := gzip.NewWriter(fw)
-	defer gw.Close()
-
-	// tar write
 	tw := tar.NewWriter(gw)
-	defer tw.Close()
 
-	// 遍历文件列表
-	for _, attach := range attachs {
+	for i, attach := range attachs {
+		name := path.Base(strings.Replace(attach.Title, "\\", "/", -1))
+		if name == "" || name == "." || name == ".." {
+			name = fmt.Sprintf("attach-%d", i+1)
+		}
+
 		fn := revel.BasePath + "/" + strings.TrimLeft(attach.Path, "/")
 		fr, err := os.Open(fn)
-		fileInfo, _ := fr.Stat()
 		if err != nil {
-			return c.RenderText("")
+			continue // 单个附件丢失时跳过
 		}
-		defer fr.Close()
-
-		// 信息头
-		h := new(tar.Header)
-		h.Name = attach.Title
-		h.Size = fileInfo.Size()
-		h.Mode = int64(fileInfo.Mode())
-		h.ModTime = fileInfo.ModTime()
-
-		// 写信息头
-		err = tw.WriteHeader(h)
-		if err != nil {
-			panic(err)
+		fileInfo, err := fr.Stat()
+		if err != nil || fileInfo.IsDir() {
+			fr.Close()
+			continue
 		}
 
-		// 写文件
-		_, err = io.Copy(tw, fr)
-		if err != nil {
-			panic(err)
+		err = tw.WriteHeader(&tar.Header{
+			Name:    name,
+			Size:    fileInfo.Size(),
+			Mode:    int64(fileInfo.Mode()),
+			ModTime: fileInfo.ModTime(),
+		})
+		if err == nil {
+			_, err = io.Copy(tw, fr)
 		}
-	} // for
+		fr.Close()
+		if err != nil {
+			tw.Close()
+			gw.Close()
+			fw.Close()
+			return err
+		}
+	}
 
-	//    tw.Close()
-	//    gw.Close()
-	//    fw.Close()
-	//    file, _ := os.Open(dir + "/" + filename)
-	// fw.Seek(0, 0)
-	return c.RenderBinary(fw, filename, revel.Attachment, time.Now()) // revel.Attachment
+	if err := tw.Close(); err != nil {
+		gw.Close()
+		fw.Close()
+		return err
+	}
+	if err := gw.Close(); err != nil {
+		fw.Close()
+		return err
+	}
+	return fw.Close()
 }
