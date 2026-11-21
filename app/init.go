@@ -449,15 +449,15 @@ func checkSecurityConfig() {
 		if isProd {
 			panic("[security] app.secret 仍为默认值或长度不足 32 位, 请在 conf/app.conf 中配置随机密钥后重启(openssl rand -hex 32)")
 		}
-		revel.WARN.Printf("[security] app.secret 仍为默认值或长度不足 32 位, 生产环境必须修改")
+		revel.AppLog.Warn("[security] app.secret 仍为默认值或长度不足 32 位, 生产环境必须修改")
 	}
 
 	if httponly, ok := revel.Config.Bool("cookie.httponly"); !ok || !httponly {
-		revel.WARN.Printf("[security] cookie.httponly 未开启, 会话 cookie 可被前端脚本读取")
+		revel.AppLog.Warn("[security] cookie.httponly 未开启, 会话 cookie 可被前端脚本读取")
 	}
 	if isProd {
 		if secure, _ := revel.Config.Bool("http.ssl"); !secure {
-			revel.WARN.Printf("[security] 生产环境建议开启 http.ssl 与 cookie.secure, 避免会话在明文 HTTP 上传输")
+			revel.AppLog.Warn("[security] 生产环境建议开启 http.ssl 与 cookie.secure, 避免会话在明文 HTTP 上传输")
 		}
 	}
 }
