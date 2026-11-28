@@ -37,6 +37,7 @@ var AuthS *AuthService
 var UpgradeS *UpgradeService
 var SessionS, sessionService *SessionService
 var ThemeS, themeService *ThemeService
+var BackupS, backupService *BackupService
 
 // onAppStart调用
 func InitService() {
@@ -62,6 +63,7 @@ func InitService() {
 	UpgradeS = &UpgradeService{}
 	SessionS = &SessionService{}
 	ThemeS = &ThemeService{}
+	BackupS = &BackupService{}
 
 	notebookService = NotebookS
 	noteService = NoteS
@@ -81,6 +83,7 @@ func InitService() {
 	emailService = EmailS
 	sessionService = SessionS
 	themeService = ThemeS
+	backupService = BackupS
 }
 
 //----------------

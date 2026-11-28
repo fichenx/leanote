@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>备份 / 恢复 - Leanote</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background:#f5f6f8; color:#333; }
+  .wrap { max-width: 760px; margin: 40px auto; padding: 0 16px; }
+  h1 { font-size: 22px; margin: 0 0 6px; }
+  .sub { color:#888; font-size: 13px; margin-bottom: 24px; }
+  .card { background:#fff; border:1px solid #e6e8eb; border-radius:10px; padding:20px 22px; margin-bottom:18px; box-shadow:0 1px 2px rgba(0,0,0,.03); }
+  .card h2 { font-size:15px; margin:0 0 4px; }
+  .card p { color:#888; font-size:13px; margin:0 0 14px; line-height:1.6; }
+  button, .btn { display:inline-block; border:none; cursor:pointer; padding:9px 18px; border-radius:6px; font-size:14px; background:#2d8cf0; color:#fff; text-decoration:none; }
+  button:hover { opacity:.9; }
+  button:disabled { opacity:.5; cursor:default; }
+  .btn.gray { background:#e9ebee; color:#444; }
+  .btn.red { background:#ed4014; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  input[type=file] { display:none; }
+  #log { background:#1e1e1e; color:#9cdcfe; font-family:Consolas, monospace; font-size:12px; padding:12px 14px; border-radius:8px; min-height:44px; max-height:240px; overflow:auto; white-space:pre-wrap; display:none; }
+  .admin { border-color:#ffd8bf; background:#fffaf5; }
+  .admin h2 { color:#d4380d; }
+  .hint { font-size:12px; color:#aaa; margin-top:10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>备份 / 恢复全部笔记</h1>
+  <div class="sub">一键备份全部笔记、笔记本结构、图片、附件、标签、格式与字体；恢复后保持原样。</div>
+
+  <div class="card">
+    <h2>完整备份（推荐）</h2>
+    <p>导出为一个 zip 备份包，包含：全部笔记本与层级、全部笔记正文、标签、创建/更新时间、全部图片与附件，同时附带通用 HTML / Markdown 副本。换电脑或重装后可一键恢复。</p>
+    <div class="row">
+      <button id="btnExport">导出全部备份</button>
+      <button class="btn gray" id="btnImport">从备份包恢复</button>
+      <input type="file" id="fileImport" accept=".zip">
+    </div>
+    <div class="hint">恢复会新建笔记本与笔记，不会删除现有数据。</div>
+  </div>
+
+  <div class="card admin">
+    <h2>整库备份（管理员 / 可选）</h2>
+    <p>直接导出/恢复 MongoDB 整库（需服务器已安装 mongodump / mongorestore）。仅管理员可用，恢复会覆盖数据库，请谨慎操作。</p>
+    <div class="row">
+      <button id="btnMongoExport" class="btn red">导出 Mongo 整库</button>
+      <button id="btnMongoImport" class="btn gray">从 Mongo 备份恢复</button>
+      <input type="file" id="fileMongo" accept=".zip">
+    </div>
+  </div>
+
+  <div id="log"></div>
+</div>
+<script>
+(function () {
+  var logEl = document.getElementById('log');
+  function log(s) {
+    logEl.style.display = 'block';
+    logEl.textContent += s + '\n';
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+  function saveBlob(blob, name) {
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  }
+  function filenameFrom(resp, fallback) {
+    var cd = resp.headers.get('Content-Disposition') || '';
+    var m = /filename\*?=(?:UTF-8'')?"?([^\";]+)"?/i.exec(cd);
+    return m ? decodeURIComponent(m[1]) : fallback;
+  }
+  function readJSON(resp) {
+    return resp.text().then(function (t) {
+      try { return JSON.parse(t); } catch (e) { return { Ok: false, Msg: t }; }
+    });
+  }
+
+  document.getElementById('btnExport').onclick = function () {
+    var b = this; b.disabled = true;
+    log('正在打包全部笔记，请稍候...');
+    fetch('/api/backup/export', { credentials: 'include' })
+      .then(function (r) {
+        var ct = r.headers.get('Content-Type') || '';
+        if (ct.indexOf('json') >= 0) return readJSON(r).then(function (j) { throw new Error(j.Msg || '导出失败'); });
+        return r.blob().then(function (blob) { saveBlob(blob, filenameFrom(r, 'leanote-backup.zip')); log('导出完成。'); });
+      })
+      .catch(function (e) { log('导出失败: ' + e.message); })
+      .then(function () { b.disabled = false; });
+  };
+
+  var fileImport = document.getElementById('fileImport');
+  document.getElementById('btnImport').onclick = function () { fileImport.click(); };
+  fileImport.onchange = function () {
+    var f = fileImport.files[0]; if (!f) return;
+    if (!confirm('确定从备份包恢复？将新建笔记本和笔记。')) { fileImport.value = ''; return; }
+    var fd = new FormData(); fd.append('file', f);
+    log('正在恢复 ' + f.name + ' ...');
+    fetch('/api/backup/import', { method: 'POST', body: fd, credentials: 'include' })
+      .then(readJSON).then(function (j) {
+        if (j.Ok) log('恢复完成：笔记本 ' + j.Item.notebooks + '，笔记 ' + j.Item.notes + '，图片 ' + j.Item.images + '，附件 ' + j.Item.attachs);
+        else log('恢复失败: ' + j.Msg);
+      }).catch(function (e) { log('恢复失败: ' + e.message); });
+    fileImport.value = '';
+  };
+
+  document.getElementById('btnMongoExport').onclick = function () {
+    var b = this; b.disabled = true;
+    log('正在导出 Mongo 整库...');
+    fetch('/api/backup/mongoExport', { method: 'POST', credentials: 'include' })
+      .then(function (r) {
+        var ct = r.headers.get('Content-Type') || '';
+        if (ct.indexOf('json') >= 0) return readJSON(r).then(function (j) { throw new Error(j.Msg || '导出失败'); });
+        return r.blob().then(function (blob) { saveBlob(blob, filenameFrom(r, 'leanote-mongo.zip')); log('Mongo 导出完成。'); });
+      })
+      .catch(function (e) { log('Mongo 导出失败: ' + e.message); })
+      .then(function () { b.disabled = false; });
+  };
+
+  var fileMongo = document.getElementById('fileMongo');
+  document.getElementById('btnMongoImport').onclick = function () { fileMongo.click(); };
+  fileMongo.onchange = function () {
+    var f = fileMongo.files[0]; if (!f) return;
+    if (!confirm('危险操作：将从备份恢复整个数据库并覆盖同名集合，确定继续？')) { fileMongo.value = ''; return; }
+    var fd = new FormData(); fd.append('file', f);
+    log('正在恢复 Mongo 整库...');
+    fetch('/api/backup/mongoImport', { method: 'POST', body: fd, credentials: 'include' })
+      .then(readJSON).then(function (j) { log(j.Ok ? 'Mongo 恢复完成。' : ('Mongo 恢复失败: ' + j.Msg)); })
+      .catch(function (e) { log('Mongo 恢复失败: ' + e.message); });
+    fileMongo.value = '';
+  };
+})();
+</script>
+</body>
+</html>

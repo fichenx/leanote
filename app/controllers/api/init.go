@@ -27,6 +27,7 @@ var attachService *service.AttachService
 var configService *service.ConfigService
 var emailService *service.EmailService
 var sessionService *service.SessionService
+var backupService *service.BackupService
 
 var pageSize = 1000
 var defaultSortField = "UpdatedTime"
@@ -120,6 +121,7 @@ func init() {
 	revel.InterceptFunc(AuthInterceptor, revel.BEFORE, &ApiNote{})
 	revel.InterceptFunc(AuthInterceptor, revel.BEFORE, &ApiTag{})
 	revel.InterceptFunc(AuthInterceptor, revel.BEFORE, &ApiNotebook{})
+	revel.InterceptFunc(AuthInterceptor, revel.BEFORE, &ApiBackup{})
 }
 
 // 最外层init.go调用
@@ -144,4 +146,5 @@ func InitService() {
 	configService = service.ConfigS
 	emailService = service.EmailS
 	sessionService = service.SessionS
+	backupService = service.BackupS
 }
